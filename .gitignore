@@ -1,0 +1,22 @@
+# Environment variables (Sensitive)
+.env
+
+# Python compilation files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDE / Editor configuration
+.vscode/
+.idea/
+
+# Local databases & mounts
+chroma_db/
+mysql_data/
