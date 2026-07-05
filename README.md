@@ -151,3 +151,59 @@ Open `http://localhost:8000` in your web browser and execute the following tests
 * **products** (`id` INT AUTO_INCREMENT PK, `name` VARCHAR, `category` VARCHAR, `price` DECIMAL)
 * **orders** (`id` INT AUTO_INCREMENT PK, `customer_name` VARCHAR, `product_id` INT FK, `quantity` INT, `order_date` DATE, `total` DECIMAL)
 * **query_audit_log** (`id` INT AUTO_INCREMENT PK, `timestamp` TIMESTAMP, `question` TEXT, `status` VARCHAR, `final_sql` TEXT, `attempts` JSON, `num_attempts` INT)
+
+---
+
+## 📦 Vercel Deployment (Production)
+
+This project can be deployed on Vercel as a Python backend. The repository already contains the necessary Vercel configuration files to help Vercel discover the FastAPI entrypoint.
+
+What I added to support Vercel:
+- `pyproject.toml` with `tool.vercel.entrypoint = "backend.main:app"` so Vercel knows the FastAPI module.
+- `vercel.json` routing pointing to `backend/main.py`.
+- `runtime.txt` to request Python 3.11.
+- `requirements.txt` (project root) and updated `backend/requirements.txt` with the runtime dependencies.
+- `backend/__init__.py` so `backend` is an importable Python package.
+
+Quick Vercel deploy steps:
+
+1. Push your branch (already done in this repo):
+
+```bash
+git add -A
+git commit -m "Vercel: add entrypoint and config"
+git push
+```
+
+2. In Vercel Dashboard: "Import Project" → select this GitHub repo.
+
+3. When configuring the project on Vercel:
+       - Framework Preset: Other
+       - Root Directory: (leave blank / repo root)
+       - Build & Output Settings: default (Vercel will use `pyproject.toml` entrypoint)
+
+4. Add required Environment Variables in the Vercel project settings:
+       - `GROQ_API_KEY` (required for LLM calls)
+       - `MYSQL_HOST`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE` (point these to a managed MySQL instance; Vercel does not provide MySQL)
+
+Notes and important details:
+- Vercel runs the Python backend but cannot host your MySQL database. Use a managed DB provider (PlanetScale, AWS RDS, ClearDB, Cloud SQL, etc.) and set `MYSQL_HOST` accordingly.
+- The `startup` logic in `backend/main.py` is guarded to skip DB / Chroma initialization if those services are unavailable at build/runtime so the app boots on Vercel.
+- For local development and CI, keep using `docker compose up --build -d` — the Docker files are safe to keep in the repo and are ignored by Vercel builds.
+
+Redeploying:
+- Any push to `main` (or your configured production branch) will trigger a Vercel build.
+- To redeploy manually from the CLI (if you install the Vercel CLI):
+
+```bash
+npx vercel --prod
+```
+
+Troubleshooting tips:
+- If Vercel build logs still show "No FastAPI entrypoint found", ensure `pyproject.toml` exists at repo root and contains: `entrypoint = "backend.main:app"` under `[tool.vercel]`.
+- Check that `backend/main.py` exports a top-level `app` variable (FastAPI instance). This repo's `app` is in `backend/main.py`.
+- Ensure all required environment variables are set in Vercel (missing `GROQ_API_KEY` will make runtime features unavailable).
+
+If you want, I can also:
+- Configure a managed MySQL and add the connection details to Vercel environment variables.
+- Set up a Healthcheck route or status page on Vercel.
