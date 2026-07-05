@@ -1,8 +1,10 @@
 import os
 import sys
+from pathlib import Path
 
 # Support importing sibling modules when run or linted from parent directory
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+BACKEND_DIR = Path(__file__).resolve().parent
+sys.path.append(str(BACKEND_DIR))
 
 # pyrefly: ignore [missing-import]
 from fastapi import FastAPI, HTTPException
@@ -16,6 +18,8 @@ from vector_store import init_vector_store
 from agent import run_query_agent, explain_sql
 
 app = FastAPI(title="SQL Query Agent API", version="1.0.0")
+STATIC_DIR = BACKEND_DIR / "static"
+STATIC_DIR.mkdir(exist_ok=True)
 
 # Enable CORS for development flexibility
 app.add_middleware(
@@ -27,12 +31,21 @@ app.add_middleware(
 )
 
 # Startup event to initialize DB and Vector Store
+# Guarded so the app can still boot on Vercel even if MySQL or ChromaDB is unavailable.
 @app.on_event("startup")
 def startup_event():
     print("FastAPI: Initializing database connection...")
-    init_db()
+    try:
+        init_db()
+    except Exception as exc:
+        print(f"FastAPI: Database initialization skipped due to error: {exc}")
+
     print("FastAPI: Initializing vector store schema index...")
-    init_vector_store()
+    try:
+        init_vector_store()
+    except Exception as exc:
+        print(f"FastAPI: Vector store initialization skipped due to error: {exc}")
+
     print("FastAPI: Startup initialization complete.")
 
 class QueryRequest(BaseModel):
@@ -102,14 +115,12 @@ def post_explain(request: ExplainRequest):
         raise HTTPException(status_code=500, detail=f"Failed to explain SQL: {str(e)}")
 
 # Mount static directory for JS and CSS assets
-# Note: Ensure the directory exists before mounting
-os.makedirs("static", exist_ok=True)
-app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 @app.get("/")
 def read_index():
     """Serves the main single-page interface."""
-    index_path = os.path.join("static", "index.html")
-    if os.path.exists(index_path):
+    index_path = STATIC_DIR / "index.html"
+    if index_path.exists():
         return FileResponse(index_path)
     return HTMLResponse(content="<h1>SQL Query Agent static folder is ready. Please write index.html</h1>", status_code=200)

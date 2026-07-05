@@ -1,0 +1,5 @@
+[tool.vercel]
+entrypoint = "backend.main:app"
+
+# Optional: specify root for builds if needed
+# root = "."
