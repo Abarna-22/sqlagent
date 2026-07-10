@@ -43,7 +43,6 @@ The agent runs a highly robust, multi-stage processing pipeline on each user req
 * **Large Language Model**: **Groq API** running `llama-3.3-70b-versatile` with zero temperature for deterministic, accurate SQL generation.
 * **Frontend**: Single Page Application built with **HTML5, CSS3 (Glassmorphism design, dark theme), and Vanilla JavaScript**.
 * **Database**: **MySQL 8.0** hosting standard business schema tables and the audit logs.
-* **Containerization**: **Docker & Docker Compose** for zero-dependency multi-service deployment.
 
 ---
 
@@ -51,14 +50,11 @@ The agent runs a highly robust, multi-stage processing pipeline on each user req
 
 ```
 sqlagent/
-├── docker-compose.yml        # Docker Compose configuration (MySQL + FastAPI)
 ├── .env                      # Active credentials config (Git ignored)
 ├── .env.example              # Sample environment configuration template
 ├── .gitignore                # Files excluded from git tracking
 ├── backend/
-│   ├── Dockerfile            # Container configuration for FastAPI
 │   ├── requirements.txt      # Python dependencies list (pip-installed)
-│   ├── .dockerignore         # Excluded container build files
 │   ├── main.py               # FastAPI server endpoints & static folder mounting
 │   ├── database.py           # MySQL operations, schema init, data seeding & audit logs
 │   ├── vector_store.py       # ChromaDB schema vector indexing and retrieval
@@ -74,7 +70,7 @@ sqlagent/
 
 ### 1. Requirements
 Ensure you have the following installed on your machine:
-* **Docker Desktop** (with the backend Linux container engine active)
+* **Python 3.14+** and a local MySQL instance or managed MySQL database
 * **Groq API Key** (You can create one for free at the [Groq Console](https://console.groq.com/keys))
 
 ### 2. Environment Configuration
@@ -98,24 +94,18 @@ MYSQL_ROOT_PASSWORD=MonkeyDluffy@99
 
 ## 🚀 Deployment
 
-Start the application by running the following command in your terminal from the project root:
+Start the application locally by running the backend directly from the project root:
 
 ```powershell
-docker compose up --build -d
+uvicorn backend.main:app --reload
 ```
 
 ### What happens behind the scenes:
-1. Docker downloads MySQL and builds the FastAPI backend image.
-2. The MySQL database starts.
-3. The FastAPI server waits for MySQL to become healthy.
-4. On startup, the FastAPI server check if MySQL contains data. If empty, it creates and seeds 4 tables (`departments`, `employees`, `products`, `orders`) with realistic business data.
-5. The FastAPI server reads the active database schema columns and embeds them in **ChromaDB**.
-6. The app becomes reachable at **`http://localhost:8000`**.
-
-To stop the containers, run:
-```powershell
-docker compose down
-```
+1. The FastAPI server starts.
+2. The backend connects to the configured MySQL database.
+3. On startup, the FastAPI server checks if MySQL contains data. If empty, it creates and seeds 4 tables (`departments`, `employees`, `products`, `orders`) with realistic business data.
+4. The FastAPI server reads the active database schema columns and embeds them in **ChromaDB**.
+5. The app becomes reachable at **`http://localhost:8000`**.
 
 ---
 

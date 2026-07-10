@@ -1,34 +1,47 @@
 import os
+from pathlib import Path
 import time
 import json
 import pymysql
 import pymysql.cursors
 from datetime import date, datetime
+from dotenv import load_dotenv
+
+# Load environment variables from project root .env if available.
+ROOT_DIR = Path(__file__).resolve().parent.parent
+for env_path in (ROOT_DIR / '.env', Path(__file__).resolve().parent / '.env'):
+    if env_path.exists():
+        load_dotenv(env_path)
 
 MYSQL_HOST = os.getenv("MYSQL_HOST", "localhost")
+MYSQL_PORT = int(os.getenv("MYSQL_PORT", "3306"))
 MYSQL_USER = os.getenv("MYSQL_USER", "sqlagent_user")
 MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "sqlagent_pass")
 MYSQL_DATABASE = os.getenv("MYSQL_DATABASE", "sqlagent_db")
 
+
 def get_db_connection(max_retries=10, delay=3):
-    """Establishes database connection with a retry loop on startup."""
+    """Establishes a database connection with a retry loop on startup."""
     attempt = 0
     while attempt < max_retries:
         try:
             conn = pymysql.connect(
                 host=MYSQL_HOST,
+                port=MYSQL_PORT,
                 user=MYSQL_USER,
                 password=MYSQL_PASSWORD,
                 database=MYSQL_DATABASE,
                 cursorclass=pymysql.cursors.DictCursor,
-                autocommit=True
+                autocommit=True,
+                connect_timeout=5,
+                charset="utf8mb4",
             )
             return conn
-        except pymysql.MySQLError as e:
+        except pymysql.MySQLError as exc:
             attempt += 1
-            print(f"Database connection attempt {attempt} failed: {e}. Retrying in {delay} seconds...")
+            print(f"Database connection attempt {attempt} failed: {exc}. Retrying in {delay} seconds...")
             time.sleep(delay)
-    raise Exception(f"Failed to connect to MySQL database at {MYSQL_HOST} after {max_retries} attempts.")
+    raise RuntimeError(f"Failed to connect to MySQL database at {MYSQL_HOST}:{MYSQL_PORT} after {max_retries} attempts.")
 
 def init_db():
     """Initializes the database schema and seeds it with sample data if empty."""
@@ -74,6 +87,17 @@ def init_db():
                     order_date DATE NOT NULL,
                     total DECIMAL(10, 2) NOT NULL,
                     FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+                ) ENGINE=InnoDB;
+            """)
+
+            # Create users table for signup/login
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    name VARCHAR(150) NOT NULL,
+                    email VARCHAR(255) NOT NULL UNIQUE,
+                    password_hash VARCHAR(128) NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 ) ENGINE=InnoDB;
             """)
 
@@ -215,6 +239,30 @@ def get_audit_logs():
             return logs
     finally:
         conn.close()
+
+
+def create_user(name: str, email: str, password_hash: str):
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO users (name, email, password_hash) VALUES (%s, %s, %s);",
+                (name, email, password_hash),
+            )
+            return cursor.lastrowid
+    finally:
+        conn.close()
+
+
+def get_user_by_email(email: str):
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT id, name, email, password_hash FROM users WHERE email = %s;", (email,))
+            return cursor.fetchone()
+    finally:
+        conn.close()
+
 
 def get_schema_metadata():
     """Retrieves list of tables and column names with data types from the active database."""

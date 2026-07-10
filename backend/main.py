@@ -1,19 +1,29 @@
+import hashlib
+import json
 import os
 import sys
 from pathlib import Path
+from datetime import datetime
+from dotenv import load_dotenv
 
 # Support importing sibling modules when run or linted from parent directory
 BACKEND_DIR = Path(__file__).resolve().parent
 sys.path.append(str(BACKEND_DIR))
+
+# Load environment variables from project root .env if available
+ROOT_DIR = BACKEND_DIR.parent
+dotenv_path = ROOT_DIR / '.env'
+if dotenv_path.exists():
+    load_dotenv(dotenv_path)
 
 # pyrefly: ignore [missing-import]
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 
-from database import init_db, get_audit_logs
+from database import init_db, get_audit_logs, get_schema_metadata
 from vector_store import init_vector_store
 from agent import run_query_agent, explain_sql
 
@@ -21,10 +31,14 @@ app = FastAPI(title="SQL Query Agent API", version="1.0.0")
 STATIC_DIR = BACKEND_DIR / "static"
 STATIC_DIR.mkdir(exist_ok=True)
 
-# Enable CORS for development flexibility
+def _get_allowed_origins() -> list[str]:
+    raw_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000")
+    return [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
+
+# Enable CORS for the React dev server and the same-origin production build.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_get_allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -50,6 +64,55 @@ def startup_event():
 
 class QueryRequest(BaseModel):
     question: str
+
+class SignupRequest(BaseModel):
+    name: str
+    email: EmailStr
+    password: str
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+def hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode('utf-8')).hexdigest()
+
+@app.post("/api/signup")
+def post_signup(request: SignupRequest):
+    name = request.name.strip()
+    email = request.email.strip().lower()
+    password = request.password
+
+    if not name or not email or not password:
+        raise HTTPException(status_code=400, detail="All signup fields are required.")
+
+    from database import create_user, get_user_by_email
+
+    if get_user_by_email(email):
+        raise HTTPException(status_code=400, detail="Email already registered.")
+
+    try:
+        create_user(name, email, hash_password(password))
+        return {"status": "success", "message": "Signup successful."}
+    except Exception as exc:
+        print(f"Error creating user: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to create user.")
+
+@app.post("/api/login")
+def post_login(request: LoginRequest):
+    email = request.email.strip().lower()
+    password = request.password
+
+    if not email or not password:
+        raise HTTPException(status_code=400, detail="Email and password are required.")
+
+    from database import get_user_by_email
+
+    user = get_user_by_email(email)
+    if not user or hash_password(password) != user['password_hash']:
+        raise HTTPException(status_code=401, detail="Invalid email or password.")
+
+    return {"status": "success", "message": "Login successful.", "user": {"id": user['id'], "name": user['name'], "email": user['email']}}
 
 @app.post("/api/query")
 def post_query(request: QueryRequest):
@@ -99,6 +162,15 @@ def get_audit():
         print(f"Error in get_audit: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch audit log: {str(e)}")
 
+@app.get("/api/schema")
+def get_schema():
+    """Retrieves the active database schema metadata for the frontend."""
+    try:
+        return get_schema_metadata()
+    except Exception as e:
+        print(f"Error in get_schema: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch schema metadata: {str(e)}")
+
 class ExplainRequest(BaseModel):
     sql: str
 
@@ -114,13 +186,21 @@ def post_explain(request: ExplainRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to explain SQL: {str(e)}")
 
-# Mount static directory for JS and CSS assets
-app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+# Path to the React production build
+REACT_DIST_DIR = BACKEND_DIR.parent / "frontend" / "dist"
+REACT_ASSETS_DIR = REACT_DIST_DIR / "assets"
+
+# Create directories so FastAPI doesn't crash on startup if not built yet
+REACT_DIST_DIR.mkdir(exist_ok=True, parents=True)
+REACT_ASSETS_DIR.mkdir(exist_ok=True, parents=True)
+
+# Mount Vite's compiled assets directory
+app.mount("/assets", StaticFiles(directory=str(REACT_ASSETS_DIR)), name="assets")
 
 @app.get("/")
 def read_index():
-    """Serves the main single-page interface."""
-    index_path = STATIC_DIR / "index.html"
+    """Serves the React single-page application."""
+    index_path = REACT_DIST_DIR / "index.html"
     if index_path.exists():
         return FileResponse(index_path)
-    return HTMLResponse(content="<h1>SQL Query Agent static folder is ready. Please write index.html</h1>", status_code=200)
+    return HTMLResponse(content="<h1>React frontend not built yet. Run 'npm run build' in the frontend folder.</h1>", status_code=200)

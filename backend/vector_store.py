@@ -4,16 +4,27 @@ import sys
 # Support importing sibling modules when run or linted from parent directory
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-# pyrefly: ignore [missing-import]
-import chromadb
-# pyrefly: ignore [missing-import]
-from chromadb.utils import embedding_functions
-from database import get_schema_metadata
-
 CHROMA_PATH = os.getenv("CHROMA_PATH", "./chroma_db")
+
+# pyrefly: ignore [missing-import]
+chromadb = None
+# pyrefly: ignore [missing-import]
+embedding_functions = None
+chromadb_import_error = None
+try:
+    import chromadb
+    from chromadb.utils import embedding_functions
+except Exception as exc:
+    chromadb_import_error = exc
+
+from database import get_schema_metadata
 
 def init_vector_store():
     """Reads table schemas from MySQL and indexes them in ChromaDB."""
+    if chromadb is None or embedding_functions is None:
+        print(f"ChromaDB unavailable: {chromadb_import_error}")
+        return
+
     try:
         client = chromadb.PersistentClient(path=CHROMA_PATH)
         emb_fn = embedding_functions.DefaultEmbeddingFunction()
@@ -58,8 +69,13 @@ def init_vector_store():
     except Exception as e:
         print(f"ChromaDB: Error indexing database tables: {e}")
 
+
 def retrieve_relevant_schema(query: str, top_k: int = 2) -> str:
     """Retrieves relevant table schema strings from ChromaDB based on the query."""
+    if chromadb is None or embedding_functions is None:
+        print("ChromaDB unavailable: returning empty schema context.")
+        return ""
+
     try:
         client = chromadb.PersistentClient(path=CHROMA_PATH)
         collection = client.get_collection(
